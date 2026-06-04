@@ -1,0 +1,16 @@
+## Configuración global
+.env
+
+## IDEs y editores (VS Code, Android Studio, IntelliJ)
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+.DS_Store
+Thumbs.db

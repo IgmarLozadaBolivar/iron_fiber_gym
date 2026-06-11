@@ -6,7 +6,7 @@
     "repo": "iron_fiber_gym"
   },
   "ios": {
-    "path": "ios"
+    "path": "mobile_app/ios"
   },
   "flutter": {
     "version": "3.44.0"

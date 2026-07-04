@@ -59,11 +59,18 @@ jobs:
       - name: Detect project type
         id: detect
         run: |
-          if [ -f "pubspec.yaml" ]; then
+          if [ "${{ inputs.ios_path }}" = "." ] || [ "${{ inputs.ios_path }}" = "ios" ] || [ -z "${{ inputs.ios_path }}" ]; then
+            PROJECT_ROOT="."
+          else
+            PROJECT_ROOT=$(dirname "${{ inputs.ios_path }}")
+          fi
+          echo "project_root=$PROJECT_ROOT" >> $GITHUB_OUTPUT
+          
+          if [ -f "$PROJECT_ROOT/pubspec.yaml" ]; then
             echo "type=flutter" >> $GITHUB_OUTPUT
-          elif [ -f "package.json" ] && grep -q '"expo"' package.json; then
+          elif [ -f "$PROJECT_ROOT/package.json" ] && grep -q '"expo"' "$PROJECT_ROOT/package.json"; then
             echo "type=expo" >> $GITHUB_OUTPUT
-          elif [ -f "package.json" ] && grep -q '"react-native"' package.json; then
+          elif [ -f "$PROJECT_ROOT/package.json" ] && grep -q '"react-native"' "$PROJECT_ROOT/package.json"; then
             echo "type=reactnative" >> $GITHUB_OUTPUT
           else
             echo "type=native" >> $GITHUB_OUTPUT
@@ -79,6 +86,7 @@ jobs:
 
       - name: Flutter pub get
         if: steps.detect.outputs.type == 'flutter'
+        working-directory: ${{ steps.detect.outputs.project_root }}
         run: flutter pub get
 
       - name: Setup Node.js
@@ -92,13 +100,14 @@ jobs:
         uses: actions/cache@v4
         id: node-modules-cache
         with:
-          path: node_modules
-          key: node-modules-${{ runner.os }}-${{ hashFiles('package-lock.json', 'yarn.lock') }}
+          path: ${{ steps.detect.outputs.project_root }}/node_modules
+          key: node-modules-${{ runner.os }}-${{ hashFiles(format('{0}/package-lock.json', steps.detect.outputs.project_root), format('{0}/yarn.lock', steps.detect.outputs.project_root)) }}
           restore-keys: |
             node-modules-${{ runner.os }}-
 
       - name: Install npm dependencies
         if: (steps.detect.outputs.type == 'reactnative' || steps.detect.outputs.type == 'expo') && steps.node-modules-cache.outputs.cache-hit != 'true'
+        working-directory: ${{ steps.detect.outputs.project_root }}
         run: npm install
 
       - name: Restore Pods cache
@@ -126,15 +135,14 @@ jobs:
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
 
           # Import certificate
           CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
           echo "$IOS_CERTIFICATE" | base64 --decode > "$CERTIFICATE_PATH"
           security import "$CERTIFICATE_PATH" -P "$IOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           # Install provisioning profile
           PROFILE_PATH=$RUNNER_TEMP/profile.mobileprovision
@@ -153,13 +161,14 @@ jobs:
           IOS_PATH: ${{ inputs.ios_path }}
           SCHEME: ${{ inputs.scheme }}
           PROJECT_TYPE: ${{ steps.detect.outputs.type }}
+          PROJECT_ROOT: ${{ steps.detect.outputs.project_root }}
           USE_SIGNING: ${{ inputs.use_signing }}
           CONFIGURATION: ${{ inputs.configuration }}
         run: |
           set -e
 
           # Navigate to iOS project
-          cd "$IOS_PATH"
+          cd "$GITHUB_WORKSPACE/$IOS_PATH"
 
           # Find workspace or project
           WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" | head -1)
@@ -189,7 +198,7 @@ jobs:
           DERIVED_DATA_PATH="${GITHUB_WORKSPACE}/DerivedData"
 
           if [ "$PROJECT_TYPE" = "flutter" ]; then
-            cd ..
+            cd "$GITHUB_WORKSPACE/$PROJECT_ROOT"
             if [ "$CONFIGURATION" = "Debug" ]; then
               echo "Building Flutter iOS Debug..."
               flutter build ios --debug --no-codesign
@@ -197,7 +206,7 @@ jobs:
               echo "Building Flutter iOS Release..."
               flutter build ios --release --no-codesign
             fi
-            cd "$IOS_PATH"
+            cd "$GITHUB_WORKSPACE/$IOS_PATH"
           elif [ "$PROJECT_TYPE" = "reactnative" ] || [ "$PROJECT_TYPE" = "expo" ]; then
             # Use xcodebuild directly for React Native/Expo
             echo "Building React Native iOS ($CONFIGURATION)..."
@@ -263,7 +272,7 @@ jobs:
           # Create IPA
           if [ "$USE_SIGNING" = "true" ]; then
             # For signed builds, use xcodebuild -exportArchive
-            cd ..
+            cd "$GITHUB_WORKSPACE/$IOS_PATH/.."
             printf '%s\n' \
               '<?xml version="1.0" encoding="UTF-8"?>' \
               '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
@@ -281,13 +290,14 @@ jobs:
               -exportPath build/export
 
             # Move IPA to expected location
-            mv build/export/*.ipa "build/$BUILD_ID.ipa"
-            echo "Created signed IPA: build/$BUILD_ID.ipa"
+            mkdir -p "${GITHUB_WORKSPACE}/build"
+            mv build/export/*.ipa "${GITHUB_WORKSPACE}/build/$BUILD_ID.ipa"
+            echo "Created signed IPA: ${GITHUB_WORKSPACE}/build/$BUILD_ID.ipa"
           else
             # For unsigned builds, find .app and create IPA
             if [ "$PROJECT_TYPE" = "flutter" ]; then
               # Flutter outputs to build/ios/iphoneos/
-              APP_PATH=$(find "${GITHUB_WORKSPACE}/build/ios/iphoneos" -name "*.app" -type d | head -1)
+              APP_PATH=$(find "${GITHUB_WORKSPACE}/${PROJECT_ROOT}/build/ios/iphoneos" -name "*.app" -type d | head -1)
             else
               # Native and React Native/Expo use DerivedData
               APP_PATH=$(find "$DERIVED_DATA_PATH/Build/Products/${CONFIGURATION}-iphoneos" -name "*.app" -type d | head -1)
@@ -298,10 +308,11 @@ jobs:
               exit 1
             fi
             echo "Found app at: $APP_PATH"
-            cd ..
-            mkdir -p build/Payload
-            cp -R "$APP_PATH" build/Payload/
-            cd build
+            
+            # Create IPA
+            mkdir -p "${GITHUB_WORKSPACE}/build/Payload"
+            cp -R "$APP_PATH" "${GITHUB_WORKSPACE}/build/Payload/"
+            cd "${GITHUB_WORKSPACE}/build"
             zip -rq "$BUILD_ID.ipa" Payload
             rm -rf Payload
             echo "Created unsigned IPA: build/$BUILD_ID.ipa"

@@ -11,3 +11,133 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// Se declara un array de con 'GOOGLE' y 'APPLE' para cumplir la función de enum en la base de datos
+enum AuthProvider{
+  GOOGLE
+  APPLE
+}
+
+
+model Role{
+  id Int @id @default(autoincrement())
+  name String
+
+  createdAt DateTime @default(now())   @map("created_at")
+  updatedAt DateTime @updatedAt   @map("updated_at")
+  deletedAt DateTime?   @map("deleted_at")
+
+  users User[] // Relación 1:N con user
+}
+
+model Muscle{
+  id BigInt @id @default(autoincrement())
+  name String
+
+  createdAt DateTime @default(now())   @map("created_at")
+  updatedAt DateTime @updatedAt   @map("updated_at")  
+  deletedAt DateTime?   @map("deleted_at")
+
+  muscles MultimediaBankMuscle[] //Relación 1:N con MultimediaBankMuscle para hacer la tabla de M:N con MultimediaBank
+}
+
+model MultimediaBank{
+  id BigInt @id @default(autoincrement())
+  title String
+  fileUrl String    @map("file_url")
+  formatType String    @map("format_type")
+
+  createdAt DateTime @default(now())   @map("created_at")
+  updatedAt DateTime @updatedAt   @map("updated_at")
+  deletedAt DateTime?   @map("deleted_at")
+
+  multimedia MultimediaBankMuscle[] //Relación 1:N con MultimediaBankMuscle para hacer la tabla de M:N con Muscle
+
+  @@map("multimedia_bank")
+}
+
+model User{
+  id BigInt @id @default(autoincrement())
+  firstName String    @map("first_name")
+  lastName String    @map("last_name")
+  email String @unique
+  password String?
+  roleId Int    @map("role_id")
+
+  registrationDate DateTime @default(now())   @map("registration_date")
+  updatedAt DateTime @updatedAt   @map("updated_at")
+  deletedAt DateTime?   @map("deleted_at")
+
+  role Role @relation(fields: [roleId], references: [id]) //Relación de N:1 con Role
+  externalAuthentications ExternalAuthentication[] //Relación de 1:N con ExternalAuthentication
+  trainerProfile TrainerProfile? //Relación de 1:1 con TrainerProfile NULLABLE porque puede ser un alumno
+  studentProfile StudentProfile? //Relacion 1:1 con StudentProfile NULLABLE porque puede ser un entrenador
+}
+
+model ExternalAuthentication{
+  id BigInt @id @default(autoincrement())
+  userId BigInt   @map("user_id")
+  provider AuthProvider // AuthProvider es un array para cumplir la función de enum en la base de datos
+  providerUid BigInt    @map("provider_uid")
+
+  linkDate DateTime @default(now())   @map("link_date")
+  updatedAt DateTime @updatedAt    @map("updated_at")
+  deletedAt DateTime?    @map("deleted_at")
+
+external User @relation(fields: [userId], references: [id]) //Relación 1:N con User
+
+@@map("external_authentication")
+}
+
+model TrainerProfile{
+  userId BigInt @id @map("user_id")
+  title String?
+  speciality String?
+  photoUrl String?   @map("photo_url")
+  linkCode String   @unique @map("link_code")
+
+  createdAt DateTime @default(now())   @map("created_at")
+  updatedAt DateTime @updatedAt   @map("updated_at")
+  deletedAt DateTime?   @map("deleted_at")
+
+  user  User @relation(fields: [userId], references: [id])//Relación 1:1 con User
+  students StudentProfile[]//Relación 1:N con StudentProfile
+
+  @@map("trainer_profile")
+}
+
+model MultimediaBankMuscle{
+  multimediaId BigInt @map("multimedia_id")
+  muscleId BigInt @map("muscle_id")
+
+  multimedia MultimediaBank @relation(fields: [multimediaId], references: [id])//Relación de 1:N con MultimediaBank
+  muscle Muscle @relation(fields: [muscleId], references: [id])// Relación de 1:N con Muscle
+
+  createdAt DateTime @default(now())    @map("created_at")
+  updatedAt DateTime @updatedAt   @map("updated_at")
+  deletedAt DateTime?   @map("deleted_at")
+
+  @@id([multimediaId,muscleId])//Su ID es un id comuesto por los dos id de las tablas principales por ser una tabla de muchos a muchos
+
+  @@map("multimedia_bank_muscle")
+}
+
+
+model StudentProfile{
+  userId BigInt @id   @map("user_id")
+  trainerId BigInt  @map("entrenador_id")
+
+  isPassive Boolean @default(false)   @map("is_passive")
+  gender String?
+  birthDate  DateTime? @db.Date    @map("birth_date")
+  heightCm Decimal?   @map("height_cm")
+  goal String?
+  injuries String?
+
+  trainer TrainerProfile @relation(fields: [trainerId],references: [userId])// Relación con TrainerProfile de N:1
+  user User @relation(fields: [userId], references: [id])//Relación de 1:1 con user
+
+  @@map("stundet_profile")
+}
+
+
